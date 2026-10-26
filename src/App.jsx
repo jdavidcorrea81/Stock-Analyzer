@@ -42,6 +42,24 @@ const boundedScore = (value) => Math.max(0, Math.min(100, Math.round(value)))
 const numberOrNull = (value) => typeof value === 'number' && Number.isFinite(value) ? value : null
 
 const chartRanges = ['1D', '3D', '1W', '1M', '3M', '6M', '12M']
+const peerGroups = {
+  T: ['VZ', 'TMUS'],
+  VZ: ['T', 'TMUS'],
+  TMUS: ['T', 'VZ'],
+  IBM: ['MSFT', 'ORCL'],
+  HPE: ['DELL', 'CSCO'],
+  AAPL: ['MSFT', 'GOOG'],
+  MSFT: ['AAPL', 'GOOG'],
+  NVDA: ['AMD', 'INTC'],
+  AMZN: ['WMT', 'TGT'],
+  JPM: ['BAC', 'C'],
+  XOM: ['CVX', 'COP'],
+  GE: ['RTX', 'BA'],
+  RTX: ['GE', 'BA'],
+  BA: ['GE', 'RTX'],
+  MMM: ['HON', 'CAT', 'GE'],
+}
+const defaultPeers = ['MSFT', 'AAPL', 'NVDA', 'AMZN', 'JPM', 'XOM', 'GE', 'RTX', 'CAT', 'HON']
 
 function HistoricalChart({ ticker }) {
   const [range, setRange] = useState('1M')
@@ -53,6 +71,13 @@ function HistoricalChart({ ticker }) {
     async function loadChart() {
       setLoading(true)
       try {
+        const rangeDays = { '1D': 5, '3D': 7, '1W': 14, '1M': 31, '3M': 93, '6M': 186, '12M': 366 }
+const res = await fetch(`${import.meta.env.BASE_URL}data/history.json`)
+if (!res.ok) throw new Error('Chart unavailable')
+const hist = await res.json()
+const cutoff = Date.now() - rangeDays[range] * 86400000
+if (!cancelled) setPoints((hist[ticker] || []).map(([t, v]) => ({ time: t * 1000, value: v })).filter((p) => p.time >= cutoff))
+return
         const days = { '1D': 5, '3D': 7, '1W': 14, '1M': 31, '3M': 93, '6M': 186, '12M': 366 }
         const fromDate = new Date()
         fromDate.setDate(fromDate.getDate() - days[range])
@@ -208,7 +233,31 @@ async function fetchCalculatedFundamentals(ticker, price) {
   }
 }
 
+let dataPromise
+const loadData = () => (dataPromise ??= fetch(`${import.meta.env.BASE_URL}data/stocks.json`).then((r) => {
+  if (!r.ok) throw new Error('Market data has not been generated yet.')
+  return r.json()
+}))
+
 async function fetchYahooTicker(ticker) {
+  const { stocks } = await loadData()
+  const d = stocks[ticker.toUpperCase()]
+  if (!d) throw new Error(`No market data found for ${ticker.toUpperCase()}.`)
+  const change = d.change ?? 0
+  const position = d.high52 > d.low52 ? ((d.price - d.low52) / (d.high52 - d.low52)) * 100 : 50
+  const trend = d.ma50 ? (d.price >= d.ma50 ? 10 : -10) : 0
+  const valuationScore = d.pe ? boundedScore(100 - Math.max(0, Math.min(100, d.pe * 2))) : 50
+  return {
+    ticker: d.ticker, name: d.name, sector: 'US listed equity', price: d.price, change,
+    sentiment: boundedScore(50 + change * 2.5),
+    technical: boundedScore(position * 0.6 + 25 + trend + change),
+    fundamental: boundedScore(valuationScore * 0.6 + (d.margin ?? 15) * 0.7),
+    pe: d.pe, forwardPe: null, peg: null, pb: d.pb, ps: d.ps, roe: d.roe, margin: d.margin, debt: d.debt,
+    marketStatus: getUsMarketStatus(), isLive: false,
+  }
+}
+
+async function fetchYahooTickerOld(ticker) {
   const quoteResponse = await fetch(`/api/nasdaq/api/quote/${encodeURIComponent(ticker)}/info?assetclass=stocks`, {
     headers: { Accept: 'application/json, text/plain, */*' },
   })
@@ -348,15 +397,15 @@ export default function App() {
   const current = marketStocks.find((stock) => stock.ticker === selected) ?? marketStocks[0] ?? null
 
   useEffect(() => {
-    const peers = {
-      T: ['VZ', 'TMUS'], VZ: ['T', 'TMUS'], TMUS: ['T', 'VZ'], IBM: ['MSFT', 'ORCL'], HPE: ['DELL', 'CSCO'],
-      AAPL: ['MSFT', 'GOOG'], MSFT: ['AAPL', 'GOOG'], NVDA: ['AMD', 'INTC'], AMZN: ['WMT', 'TGT'],
-      JPM: ['BAC', 'C'], XOM: ['CVX', 'COP'], GE: ['RTX', 'BA'], RTX: ['GE', 'BA'], BA: ['GE', 'RTX'],
-    }
     if (!current) return
+    const peerTickers = Array.from(new Set([
+      ...(peerGroups[current.ticker] || []),
+      ...defaultPeers,
+    ])).filter((ticker) => ticker !== current.ticker).slice(0, 2)
+
     let cancelled = false
     ;(async () => {
-      for (const ticker of peers[current.ticker] || []) {
+      for (const ticker of peerTickers) {
         if (cancelled) break
         try {
           const peer = await fetchYahooTicker(ticker)
@@ -436,12 +485,11 @@ export default function App() {
             <div className="panel-heading"><div><p className="section-label">PEER COMPARISON</p><h2>{current.ticker} vs. competitors</h2></div><div className="peer-legend"><span><i className="strong" />Strongest</span><span><i className="middle" />Middle</span><span><i className="weak" />Weakest</span></div></div>
             <div className="peer-comparison-grid">
               {(() => {
-                const peers = {
-                  T: ['VZ', 'TMUS'], VZ: ['T', 'TMUS'], TMUS: ['T', 'VZ'], IBM: ['MSFT', 'ORCL'], HPE: ['DELL', 'CSCO'],
-                  AAPL: ['MSFT', 'GOOG'], MSFT: ['AAPL', 'GOOG'], NVDA: ['AMD', 'INTC'], AMZN: ['WMT', 'TGT'],
-                  JPM: ['BAC', 'C'], XOM: ['CVX', 'COP'], GE: ['RTX', 'BA'], RTX: ['GE', 'BA'], BA: ['GE', 'RTX'],
-                }
-                const tickers = [current.ticker, ...(peers[current.ticker] || [])].slice(0, 3)
+                const tickers = Array.from(new Set([
+                  current.ticker,
+                  ...(peerGroups[current.ticker] || []),
+                  ...defaultPeers,
+                ])).filter((ticker) => ticker !== current.ticker || marketStocks.some((stock) => stock.ticker === current.ticker)).slice(0, 3)
                 const peerStocks = tickers.map((ticker) => marketStocks.find((item) => item.ticker === ticker) || {
                   ticker, name: ticker, change: null, sentiment: null, technical: null, fundamental: null,
                   pe: null, forwardPe: null, pb: null, ps: null, roe: null, margin: null, debt: null, loadingPeer: true,
