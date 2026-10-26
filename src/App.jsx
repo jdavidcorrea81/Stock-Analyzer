@@ -167,8 +167,7 @@ async function fetchCalculatedFundamentals(ticker, price) {
     let cik = knownCiks[ticker]
     if (!cik) {
       const [localMapResponse, remoteMapResponse] = await Promise.all([
-        fetch('/company_tickers.json'),
-        fetch('/api/sec-files/files/company_tickers.json').catch(() => null),
+        fetch(`${import.meta.env}${import.meta.env.BASE_URL}company_tickers || `${import.meta.BASE_URL)`,        fetch('/api/sec-files/files/company_tickers.json').catch(() => null),
       ])
       let company = null
       if (localMapResponse.ok) {
@@ -283,7 +282,7 @@ export default function App() {
     async function loadUniverse() {
       setUniverseLoading(true)
       try {
-        const response = await fetch('/sp500.csv')
+        const response = await fetch(`${import.meta.env.BASE_URL}sp500.csv`)
         const csv = await response.text()
         const symbols = csv.split('\n').slice(1).map((row) => row.split(',')[0].replace(/"/g, '').trim()).filter(Boolean).slice(0, 20)
         for (const symbol of symbols) {
