@@ -167,7 +167,7 @@ async function fetchCalculatedFundamentals(ticker, price) {
     let cik = knownCiks[ticker]
     if (!cik) {
       const [localMapResponse, remoteMapResponse] = await Promise.all([
-        fetch(`${import.meta.env}${import.meta.env.BASE_URL}company_tickers || `${import.meta.BASE_URL)`,        fetch('/api/sec-files/files/company_tickers.json').catch(() => null),
+    fetch(`${import.meta.env.BASE_URL}company_tickers.json`).catch(() => null),
       ])
       let company = null
       if (localMapResponse.ok) {
